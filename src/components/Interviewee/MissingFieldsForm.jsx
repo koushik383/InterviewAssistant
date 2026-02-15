@@ -7,7 +7,8 @@ const MissingFieldsForm = ({ resumeData, onComplete }) => {
   const [loading, setLoading] = useState(false);
 
   const missingFields = [];
-  if (!resumeData.name) missingFields.push('name');
+  // Always require name entry for validation, even if extracted
+  missingFields.push('name');
   if (!resumeData.email) missingFields.push('email');
   if (!resumeData.phone) missingFields.push('phone');
 
@@ -31,21 +32,44 @@ const MissingFieldsForm = ({ resumeData, onComplete }) => {
     <div className="missing-fields-container">
       <Card className="missing-fields-card">
         <h2>Complete Your Profile</h2>
-        <p>We need the following information to proceed:</p>
+        <p>We need the following information to proceed. Please enter your name exactly as it appears in your resume:</p>
 
         <Form
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
-          initialValues={resumeData}
+          initialValues={{
+            ...resumeData,
+            name: undefined, // Don't pre-fill name to force manual entry for validation
+          }}
         >
           {missingFields.includes('name') && (
             <Form.Item
               label="Full Name"
               name="name"
-              rules={[{ required: true, message: 'Please enter your full name' }]}
+              validateTrigger={['onBlur', 'onChange']}
+              rules={[
+                { required: true, message: 'Please enter your full name' },
+                {
+                  validator: (_, value) => {
+                    console.log('Validating name:', { extracted: resumeData.name, entered: value });
+                    if (resumeData.name && value) {
+                      // Normalize both names for comparison (trim whitespace, lowercase)
+                      const extractedName = resumeData.name.trim().toLowerCase();
+                      const enteredName = value.trim().toLowerCase();
+
+                      console.log('Normalized names:', { extracted: extractedName, entered: enteredName });
+
+                      if (extractedName !== enteredName) {
+                        return Promise.reject(new Error(`Name must match the one extracted from your resume: "${resumeData.name}"`));
+                      }
+                    }
+                    return Promise.resolve();
+                  }
+                }
+              ]}
             >
-              <Input placeholder="John Doe" />
+              <Input placeholder={resumeData.name || "John Doe"} />
             </Form.Item>
           )}
 

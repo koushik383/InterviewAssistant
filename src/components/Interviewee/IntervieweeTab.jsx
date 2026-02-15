@@ -34,17 +34,10 @@ const IntervieweeTab = () => {
   const handleResumeData = (data) => {
     setResumeData(data);
 
-    // Check if all fields are present
-    if (data.name && data.email && data.phone) {
-      setStage('qualification');
-      dispatch(
-        completeCandidate({
-          id: candidates.currentCandidateId,
-          name: data.name,
-          email: data.email,
-          phone: data.phone,
-        })
-      );
+    // Always require manual name entry for validation, even if name was extracted
+    // Only skip missing fields if email and phone are present
+    if (data.email && data.phone) {
+      setStage('missing-fields');
     } else {
       setStage('missing-fields');
     }
