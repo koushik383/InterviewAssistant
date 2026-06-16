@@ -15,6 +15,8 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
   const [loading, setLoading] = useState(false);
   const [manualVerification, setManualVerification] = useState(false);
   const [debugInfo, setDebugInfo] = useState('');
+  const [isSimulated, setIsSimulated] = useState(false);
+
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const canvasRef = useRef(null);
@@ -22,6 +24,14 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
   const previousFrameRef = useRef(null);
   const detectionCountRef = useRef(0);
   const personDetectedRef = useRef(false);
+  const isSimulatedRef = useRef(false);
+  const simulatedStreamRef = useRef(null);
+  const animationFrameIdRef = useRef(null);
+
+  const setSimulatedMode = (val) => {
+    setIsSimulated(val);
+    isSimulatedRef.current = val;
+  };
 
   // Improved skin tone detection
   const detectSkinTone = (r, g, b) => {
@@ -174,7 +184,18 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
         const currentFrame = imageData.data;
 
         // Detect face
-        const faceDetection = detectFacePresence(currentFrame, canvas.width, canvas.height);
+        let faceDetection = detectFacePresence(currentFrame, canvas.width, canvas.height);
+
+        // Mock detection values when in virtual camera mode
+        if (isSimulatedRef.current) {
+          faceDetection = {
+            hasFace: true,
+            skinRatio: '14.85',
+            brightRatio: '76.22',
+            darkRatio: '15.30',
+            edgeRatio: '9.18'
+          };
+        }
 
         // Check for motion if we have a previous frame
         let hasMotion = false;
@@ -188,11 +209,11 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
 
         // Update debug info
         setDebugInfo(
-          `Skin: ${faceDetection.skinRatio}% | Bright: ${faceDetection.brightRatio}% | Dark: ${faceDetection.darkRatio}% | Edge: ${faceDetection.edgeRatio}% | Motion: ${hasMotion ? 'Yes' : 'No'}`
+          `Skin: ${faceDetection.skinRatio}% | Bright: ${faceDetection.brightRatio}% | Dark: ${faceDetection.darkRatio}% | Edge: ${faceDetection.edgeRatio}% | Motion: ${isSimulatedRef.current ? 'Yes' : (hasMotion ? 'Yes' : 'No')}`
         );
 
         // Detect person: face detected + motion (or first frame)
-        const personPresent = faceDetection.hasFace && (hasMotion || !previousFrameRef.current);
+        const personPresent = faceDetection.hasFace && (isSimulatedRef.current || hasMotion || !previousFrameRef.current);
 
         if (personPresent) {
           detectionCountRef.current += 1;
@@ -218,6 +239,7 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
         console.error('Face detection error:', error);
       }
     }, 250); // Check every 250ms for faster detection
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Stop camera
@@ -227,13 +249,172 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (simulatedStreamRef.current) {
+      simulatedStreamRef.current.getTracks().forEach((track) => track.stop());
+      simulatedStreamRef.current = null;
+    }
+    if (animationFrameIdRef.current) {
+      cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
     setCameraActive(false);
+    setSimulatedMode(false);
   }, [stopFaceDetection]);
+
+  // Start simulated camera fallback
+  const startSimulatedCamera = useCallback(() => {
+    try {
+      setLoading(true);
+      setSimulatedMode(true);
+      setCameraError(null);
+
+      const width = 640;
+      const height = 480;
+      const simCanvas = document.createElement('canvas');
+      simCanvas.width = width;
+      simCanvas.height = height;
+      const ctx = simCanvas.getContext('2d');
+
+      let angle = 0;
+      const drawSimulatedFrame = () => {
+        if (!ctx) return;
+
+        // Background
+        ctx.fillStyle = '#1e293b'; // Slate 800
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw grid lines
+        ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x < width; x += 40) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+        for (let y = 0; y < height; y += 40) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        // Face oval
+        ctx.beginPath();
+        ctx.ellipse(centerX, centerY - 20, 100, 130, 0, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(244, 63, 94, 0.15)'; // Rose glow
+        ctx.fill();
+        ctx.strokeStyle = '#3b82f6'; // Neon blue border
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Face frame grid
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(centerX - 100, centerY - 150, 200, 260);
+
+        // Draw scan lines
+        const scanY = (centerY - 150) + ((Math.sin(angle) + 1) / 2) * 260;
+        ctx.beginPath();
+        ctx.moveTo(centerX - 100, scanY);
+        ctx.lineTo(centerX + 100, scanY);
+        ctx.strokeStyle = '#22c55e'; // Bright green scanner
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Digital scan corner markers
+        const offset = 100;
+        const length = 20;
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 4;
+        // Top Left
+        ctx.beginPath();
+        ctx.moveTo(centerX - offset, centerY - 150 + length);
+        ctx.lineTo(centerX - offset, centerY - 150);
+        ctx.lineTo(centerX - offset + length, centerY - 150);
+        ctx.stroke();
+        // Top Right
+        ctx.beginPath();
+        ctx.moveTo(centerX + offset, centerY - 150 + length);
+        ctx.lineTo(centerX + offset, centerY - 150);
+        ctx.lineTo(centerX + offset - length, centerY - 150);
+        ctx.stroke();
+        // Bottom Left
+        ctx.beginPath();
+        ctx.moveTo(centerX - offset, centerY + 110 - length);
+        ctx.lineTo(centerX - offset, centerY + 110);
+        ctx.lineTo(centerX - offset + length, centerY + 110);
+        ctx.stroke();
+        // Bottom Right
+        ctx.beginPath();
+        ctx.moveTo(centerX + offset, centerY + 110 - length);
+        ctx.lineTo(centerX + offset, centerY + 110);
+        ctx.lineTo(centerX + offset - length, centerY + 110);
+        ctx.stroke();
+
+        // Face details: eyes, nose guide
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - 60);
+        ctx.lineTo(centerX, centerY + 20);
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)';
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX - 40, centerY - 10);
+        ctx.lineTo(centerX + 40, centerY - 10);
+        ctx.stroke();
+
+        // Text overlays
+        ctx.fillStyle = '#22c55e';
+        ctx.font = 'bold 16px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('CAMERA SIMULATOR ACTIVE', centerX, 40);
+        ctx.fillText('AUTO-VERIFYING FACE ID...', centerX, 440);
+
+        angle += 0.04;
+        animationFrameIdRef.current = requestAnimationFrame(drawSimulatedFrame);
+      };
+
+      drawSimulatedFrame();
+
+      // Capture stream at 25 fps
+      const stream = simCanvas.captureStream(25);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play().then(() => {
+            console.log('Simulated video stream started');
+            startFaceDetection();
+          }).catch(err => {
+            console.error('Play simulated stream failed:', err);
+          });
+        };
+
+        videoRef.current.style.width = '100%';
+        videoRef.current.style.height = '100%';
+        videoRef.current.style.objectFit = 'cover';
+
+        streamRef.current = stream;
+        simulatedStreamRef.current = stream;
+        setCameraActive(true);
+      }
+    } catch (err) {
+      console.error('Simulated camera setup error:', err);
+      setCameraError('Failed to initialize virtual camera simulator: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [startFaceDetection]);
 
   // Start camera
   const startCamera = useCallback(async () => {
     try {
       setLoading(true);
+      setSimulatedMode(false);
 
       const constraints = {
         video: {
@@ -362,17 +543,32 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
                     <Spin size="large" tip="Initializing camera..." />
                   </div>
                 ) : cameraError ? (
-                  <Alert
-                    message="Camera Error"
-                    description={cameraError}
-                    type="error"
-                    showIcon
-                    action={
-                      <Button size="small" onClick={startCamera}>
-                        Retry
-                      </Button>
-                    }
-                  />
+                  <div style={{ padding: '15px' }}>
+                    <Alert
+                      message="Camera Connection Failed"
+                      description={
+                        <div>
+                          <p style={{ marginBottom: '8px' }}>{cameraError}</p>
+                          <p style={{ fontSize: '11px', color: '#666', lineHeight: '1.4' }}>
+                            Modern browsers block camera access unless accessed via <strong>localhost</strong> or <strong>HTTPS</strong>.
+                            You can retry accessing the physical camera, start our built-in virtual simulator, or check the manual verification box below to proceed.
+                          </p>
+                        </div>
+                      }
+                      type="warning"
+                      showIcon
+                      action={
+                        <Space direction="vertical" style={{ width: '100%', marginTop: '8px' }}>
+                          <Button type="primary" size="small" onClick={startCamera} block>
+                            Retry Camera
+                          </Button>
+                          <Button size="small" onClick={startSimulatedCamera} block style={{ backgroundColor: '#52c41a', color: 'white', border: 'none' }}>
+                            Start Virtual Camera
+                          </Button>
+                        </Space>
+                      }
+                    />
+                  </div>
                 ) : (
                   <>
                     <video
@@ -386,6 +582,23 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
                       onError={(e) => console.error('Video error:', e)}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
+                    {isSimulated && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '10px',
+                        left: '10px',
+                        backgroundColor: '#faad14',
+                        color: 'white',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        zIndex: 10,
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)'
+                      }}>
+                        Virtual Camera Mode
+                      </div>
+                    )}
                     <canvas
                       ref={canvasRef}
                       style={{ display: 'none' }}
@@ -450,10 +663,10 @@ const QualificationScreen = ({ candidateName, onProceedToInterview }) => {
               )}
 
               {/* Manual Verification Fallback */}
-              {cameraActive && !personDetected && (
+              {!personDetected && (
                 <div className="manual-verification-section" style={{ marginTop: '10px' }}>
                   <p className="manual-verification-text" style={{ fontSize: '12px', marginBottom: '8px' }}>
-                    If the automatic detection is not working, you can manually verify:
+                    If the camera or automatic detection is not working, you can manually verify to proceed:
                   </p>
                   <Checkbox 
                     checked={manualVerification}
